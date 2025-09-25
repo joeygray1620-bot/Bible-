@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#0f172a">
+  <title>Bible Reading Plan</title>
+  <style>
+    :root{--bg:#0f172a;--card:#111827;--ink:#e5e7eb;--muted:#9ca3af;--gold:#facc15;--accent:#22d3ee}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    header{padding:16px 20px;display:flex;align-items:center;gap:12px;background:#0b1221;position:sticky;top:0;z-index:10;box-shadow:0 2px 10px rgba(0,0,0,.4)}
+    header img{width:32px;height:32px}
+    header h1{margin:0;font-size:18px;font-weight:700}
+    main{padding:20px;max-width:900px;margin:0 auto}
+    .card{background:var(--card);border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:16px;box-shadow:0 10px 30px rgba(0,0,0,.3)}
+    .row{display:grid;grid-template-columns:1fr;gap:12px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .meta{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .meta .date{color:var(--muted);font-size:14px}
+    .badges{display:flex;gap:8px;flex-wrap:wrap}
+    .badge{padding:6px 10px;background:#0b1221;border:1px solid rgba(255,255,255,.08);border-radius:999px;font-size:12px;color:var(--muted)}
+    .plan{display:grid;gap:10px}
+    .line{display:flex;justify-content:space-between;gap:8px;align-items:center;background:#0c1323;border:1px solid rgba(255,255,255,.08);border-radius:12px;padding:10px}
+    .line .label{color:var(--muted);font-size:13px;width:140px;flex:0 0 140px}
+    .line .reading{font-weight:600}
+    .controls{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}
+    button{border:none;border-radius:10px;padding:10px 14px;background:#1f2937;color:var(--ink);font-weight:600}
+    button.primary{background:linear-gradient(135deg,var(--gold),#fb923c);color:#111827}
+    button.accent{background:linear-gradient(135deg,var(--accent),#60a5fa);color:#0b1221}
+    button:active{transform:translateY(1px)}
+    .progress{margin-top:10px;font-size:13px;color:var(--muted)}
+    footer{padding:24px;color:var(--muted);text-align:center}
+    @media(min-width:720px){.row{grid-template-columns:1fr .8fr}}
+    a{color:var(--accent);text-decoration:none}
+    .checkbox{appearance:none;width:22px;height:22px;border-radius:6px;border:2px solid var(--muted);display:inline-grid;place-items:center;cursor:pointer;background:#0c1323}
+    .checkbox:checked{background:var(--gold);border-color:var(--gold)}
+    .checkbox:checked::after{content:"✓";color:#111827;font-weight:800}
+  </style>
+</head>
+<body>
+  <header>
+    <img src="assets/icon-72.png" alt="icon">
+    <h1>Bible Reading Plan</h1>
+  </header>
+  <main>
+    <section class="card">
+      <div class="meta">
+        <div>
+          <div id="todayLabel" class="date">Loading…</div>
+          <div id="dayTitle" style="font-size:20px;font-weight:800;margin-top:4px;">Day —</div>
+        </div>
+        <div class="badges">
+          <span class="badge" id="streak">Streak: 0</span>
+          <span class="badge" id="completed">Completed: 0 / 365</span>
+        </div>
+      </div>
+      <div class="plan" id="plan"></div>
+      <div class="controls">
+        <button id="prevBtn">◀ Previous</button>
+        <button id="todayBtn" class="accent">Today</button>
+        <button id="nextBtn">Next ▶</button>
+        <button id="toggleComplete" class="primary">Mark Day Complete</button>
+        <button id="resetBtn">Reset Progress</button>
+      </div>
+      <div class="progress" id="progressNote"></div>
+    </section>
+    <footer>
+      Install: In Chrome, tap ⋮ → “Add to Home screen”. App works offline after first load.
+    </footer>
+  </main>
+
+  <script>
+    const fmt = new Intl.DateTimeFormat(undefined,{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+    const LS_KEY = 'brp_progress_v1';
+    const LS_DAY = 'brp_current_day_v1';
+    let PLAN = [];
+    let currentDay = null;
+    let progress = JSON.parse(localStorage.getItem(LS_KEY) || '{"completedDays":[], "lastCompleted": null}');
+
+    function saveProgress(){ localStorage.setItem(LS_KEY, JSON.stringify(progress)); }
+
+    function updateHeader(){
+      const now = new Date();
+      document.getElementById('todayLabel').textContent = fmt.format(now);
+      document.getElementById('dayTitle').textContent = `Day ${currentDay}`;
+      const completed = new Set(progress.completedDays||[]);
+      document.getElementById('completed').textContent = `Completed: ${completed.size} / 365`;
+
+      // Simple streak: consecutive days ending today
+      let streak = 0;
+      let d = dayOfYear(now);
+      for(let i=d; i>=1; i--){
+        if(!completed.has(i)) break;
+        streak++;
+      }
+      document.getElementById('streak').textContent = `Streak: ${streak}`;
+    }
+
+    function dayOfYear(date){
+      const start = new Date(date.getFullYear(),0,1);
+      const diff = date - start;
+      return Math.floor(diff/86400000)+1;
+    }
+
+    function deriveTodayDay(){
+      // Use local device day-of-year mapped into 1..365 (ignore leap day)
+      const doy = dayOfYear(new Date());
+      return Math.min(365, doy);
+    }
+
+    function renderDay(day){
+      currentDay = day;
+      localStorage.setItem(LS_DAY, String(day));
+      updateHeader();
+      const slot = PLAN.find(p => p.day === day);
+      const planEl = document.getElementById('plan');
+      planEl.innerHTML = '';
+      const items = [
+        ['Gospel', slot.gospel],
+        ['OT History', slot.ot_history],
+        ['Prophet', slot.prophet],
+        ['NT Story', slot.nt_story],
+        ['Letter', slot.letter],
+        ['Psalm (Forward)', slot.psalm_forward],
+        ['Psalm (Backward)', slot.psalm_backward],
+        ['Proverbs', slot.proverbs],
+      ];
+      const completed = new Set(progress.completedDays||[]);
+      items.forEach(([label, reading]) => {
+        const line = document.createElement('div');
+        line.className = 'line';
+        const left = document.createElement('div');
+        left.className = 'label';
+        left.textContent = label;
+        const right = document.createElement('div');
+        right.className = 'reading';
+        right.textContent = reading;
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.className = 'checkbox';
+        cb.checked = completed.has(day + ':' + label);
+        cb.addEventListener('change', () => {
+          const key = day + ':' + label;
+          if(cb.checked){
+            if(!progress.completedDays.includes(key)) progress.completedDays.push(key);
+          } else {
+            progress.completedDays = progress.completedDays.filter(x => x !== key);
+          }
+          saveProgress();
+          updateProgressNote();
+        });
+        const rightBox = document.createElement('div');
+        rightBox.style.display='flex'; rightBox.style.gap='10px'; rightBox.style.alignItems='center';
+        rightBox.appendChild(right);
+        rightBox.appendChild(cb);
+        line.appendChild(left);
+        line.appendChild(rightBox);
+        planEl.appendChild(line);
+      });
+      updateProgressNote();
+    }
+
+    function updateProgressNote(){
+      const dayKeys = ['Gospel','OT History','Prophet','NT Story','Letter','Psalm (Forward)','Psalm (Backward)','Proverbs'].map(l => currentDay+':'+l);
+      const doneCount = (progress.completedDays||[]).filter(k => dayKeys.includes(k)).length;
+      document.getElementById('progressNote').textContent = `Day ${currentDay}: ${doneCount}/8 readings completed.`;
+    }
+
+    function markDayComplete(){
+      const labels = ['Gospel','OT History','Prophet','NT Story','Letter','Psalm (Forward)','Psalm (Backward)','Proverbs'];
+      const keys = labels.map(l => currentDay + ':' + l);
+      const set = new Set(progress.completedDays||[]);
+      let allDone = keys.every(k => set.has(k));
+      if(allDone){
+        // Uncheck all
+        progress.completedDays = (progress.completedDays||[]).filter(k => !keys.includes(k));
+      }else{
+        // Check all
+        keys.forEach(k => { if(!set.has(k)) (progress.completedDays||[]).push(k); });
+      }
+      saveProgress();
+      renderDay(currentDay);
+    }
+
+    async function main(){
+      try{
+        const res = await fetch('plan.json');
+        PLAN = await res.json();
+      }catch(e){
+        console.error('Failed to load plan.json', e);
+        // fallback: minimal
+        PLAN = [{day:1,gospel:'Matthew 1',ot_history:'Genesis 1',prophet:'Isaiah 1',nt_story:'Acts 1',letter:'Romans 1',psalm_forward:'Psalms 1',psalm_backward:'Psalms 150',proverbs:'Proverbs 1'}];
+      }
+      const savedDay = parseInt(localStorage.getItem(LS_DAY) || '0', 10);
+      const today = deriveTodayDay();
+      renderDay(savedDay>=1 && savedDay<=365 ? savedDay : today);
+
+      document.getElementById('prevBtn').onclick = ()=> renderDay(currentDay<=1?365:currentDay-1);
+      document.getElementById('nextBtn').onclick = ()=> renderDay(currentDay>=365?1:currentDay+1);
+      document.getElementById('todayBtn').onclick= ()=> renderDay(deriveTodayDay());
+      document.getElementById('toggleComplete').onclick = markDayComplete;
+      document.getElementById('resetBtn').onclick = ()=>{
+        if(confirm('Reset all progress?')){
+          progress = {"completedDays":[], "lastCompleted": null};
+          saveProgress();
+          renderDay(currentDay);
+        }
+      };
+
+      // register service worker
+      if('serviceWorker' in navigator){
+        try{ await navigator.serviceWorker.register('sw.js'); }catch(e){ console.warn('SW reg failed', e); }
+      }
+    }
+    main();
+  </script>
+</body>
+</html>
